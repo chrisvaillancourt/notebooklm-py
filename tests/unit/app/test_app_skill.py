@@ -64,6 +64,13 @@ def test_get_skill_version_file_not_exists(tmp_path: Path) -> None:
     assert get_skill_version(tmp_path / "nonexistent.md") is None
 
 
+def test_get_skill_version_invalid_utf8_returns_none(tmp_path: Path) -> None:
+    skill_file = tmp_path / "SKILL.md"
+    skill_file.write_bytes(b"\xff")
+
+    assert get_skill_version(skill_file) is None
+
+
 # ---------------------------------------------------------------------------
 # add_version_comment (MOVED from TestAddVersionComment)
 # ---------------------------------------------------------------------------
@@ -204,6 +211,18 @@ def test_classify_target_overwrite_when_differing(tmp_path: Path) -> None:
     path = tmp_path / TARGETS["claude"].relative_path
     path.parent.mkdir(parents=True)
     path.write_text("old body", encoding="utf-8")
+
+    with patch.object(Path, "cwd", return_value=tmp_path):
+        status, resolved = classify_target("claude", "project", "stamped body")
+
+    assert status == TARGET_OVERWRITE
+    assert resolved == path
+
+
+def test_classify_target_overwrite_when_content_is_not_utf8(tmp_path: Path) -> None:
+    path = tmp_path / TARGETS["claude"].relative_path
+    path.parent.mkdir(parents=True)
+    path.write_bytes(b"\xff")
 
     with patch.object(Path, "cwd", return_value=tmp_path):
         status, resolved = classify_target("claude", "project", "stamped body")

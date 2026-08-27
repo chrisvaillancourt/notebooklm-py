@@ -339,7 +339,10 @@ def status(scope: str, target_name: str, json_output: bool):
     """Check installed skill targets and version info."""
     cli_version = get_package_version()
     selected_targets = iter_targets(target_name)
-    source_content = get_skill_source_content()
+    try:
+        source_content = get_skill_source_content()
+    except (OSError, UnicodeError):
+        source_content = None
     stamped_content = (
         add_version_comment(source_content, cli_version) if source_content is not None else None
     )
@@ -386,7 +389,12 @@ def status(scope: str, target_name: str, json_output: bool):
                 console.print(
                     "    [yellow]Version mismatch[/yellow] - run [cyan]notebooklm skill install[/cyan]"
                 )
-            elif row["content_mismatch"]:
+            if row["content_mismatch"] is None:
+                console.print(
+                    "    [yellow]Content check unavailable[/yellow] - packaged skill source "
+                    "could not be read"
+                )
+            elif row["content_mismatch"] and not row["version_mismatch"]:
                 console.print(
                     "    [yellow]Content mismatch[/yellow] - installed content differs from "
                     "the packaged skill; run [cyan]notebooklm skill install[/cyan]"

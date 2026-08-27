@@ -87,9 +87,11 @@ def get_skill_version(skill_path: Path) -> str | None:
     if not skill_path.exists():
         return None
 
-    with open(skill_path, encoding="utf-8") as f:
-        content = f.read(500)  # Read first 500 chars
-
+    try:
+        with open(skill_path, encoding="utf-8") as f:
+            content = f.read(500)  # Read first 500 chars
+    except (OSError, UnicodeError):
+        return None
     match = re.search(r"notebooklm-py v([\d.]+)", content)
     return match.group(1) if match else None
 
@@ -172,8 +174,8 @@ def classify_target(target: str, scope: str, stamped_content: str) -> tuple[str,
         return TARGET_CREATE, skill_path
     try:
         existing = skill_path.read_text(encoding="utf-8")
-    except OSError:
-        # Unreadable existing file -- treat as differing so we surface intent.
+    except (OSError, UnicodeError):
+        # Unreadable or undecodable existing content is necessarily not canonical.
         return TARGET_OVERWRITE, skill_path
     if existing == stamped_content:
         return TARGET_UP_TO_DATE, skill_path

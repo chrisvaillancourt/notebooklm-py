@@ -585,6 +585,65 @@ class TestSkillStatus:
         assert "content mismatch" in result.output.lower()
         assert "version mismatch" not in result.output.lower()
 
+    def test_skill_status_json_treats_source_read_failure_as_unknown(self, runner, tmp_path):
+        """Packaged-source read failures do not hide local installation status."""
+        home = tmp_path / "home"
+        version = "1.2.3"
+        dest = home / ".agents" / "skills" / "notebooklm" / "SKILL.md"
+        dest.parent.mkdir(parents=True)
+        dest.write_text(f"<!-- notebooklm-py v{version} -->\n# Installed", encoding="utf-8")
+
+        with (
+            patch.object(skill_module.Path, "home", return_value=home),
+            patch.object(skill_module, "get_package_version", return_value=version),
+            patch.object(skill_module, "get_skill_source_content", side_effect=PermissionError),
+        ):
+            result = runner.invoke(cli, ["skill", "status", "--target", "agents", "--json"])
+
+        assert result.exit_code == 0, result.output
+        agents = json.loads(result.output)["targets"][0]
+        assert agents["installed"] is True
+        assert agents["skill_version"] == version
+        assert agents["content_mismatch"] is None
+
+    def test_skill_status_displays_unavailable_content_check(self, runner, tmp_path):
+        """Human-readable status distinguishes an unavailable comparison."""
+        home = tmp_path / "home"
+        dest = home / ".agents" / "skills" / "notebooklm" / "SKILL.md"
+        dest.parent.mkdir(parents=True)
+        dest.write_text("<!-- notebooklm-py v1.2.3 -->\n# Installed", encoding="utf-8")
+
+        with (
+            patch.object(skill_module.Path, "home", return_value=home),
+            patch.object(skill_module, "get_package_version", return_value="1.2.3"),
+            patch.object(skill_module, "get_skill_source_content", return_value=None),
+        ):
+            result = runner.invoke(cli, ["skill", "status", "--target", "agents"])
+
+        assert result.exit_code == 0, result.output
+        assert "content check unavailable" in result.output.lower()
+        assert "content mismatch" not in result.output.lower()
+
+    def test_skill_status_json_reports_invalid_installed_content_as_drift(self, runner, tmp_path):
+        """Invalid UTF-8 is installed but cannot equal the canonical skill."""
+        home = tmp_path / "home"
+        dest = home / ".agents" / "skills" / "notebooklm" / "SKILL.md"
+        dest.parent.mkdir(parents=True)
+        dest.write_bytes(b"\xff")
+
+        with (
+            patch.object(skill_module.Path, "home", return_value=home),
+            patch.object(skill_module, "get_package_version", return_value="1.2.3"),
+            patch.object(skill_module, "get_skill_source_content", return_value="# Canonical"),
+        ):
+            result = runner.invoke(cli, ["skill", "status", "--target", "agents", "--json"])
+
+        assert result.exit_code == 0, result.output
+        agents = json.loads(result.output)["targets"][0]
+        assert agents["installed"] is True
+        assert agents["skill_version"] is None
+        assert agents["content_mismatch"] is True
+
     def test_skill_status_json_reports_unknown_content_for_missing_target(self, runner, tmp_path):
         """An absent target has no content comparison result."""
         home = tmp_path / "home"
