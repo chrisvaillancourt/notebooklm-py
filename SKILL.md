@@ -404,7 +404,7 @@ These capabilities are available via CLI but not in NotebookLM's web interface:
 6. Check `notebooklm artifact list -n <notebook_id>` later for status
 7. `notebooklm download audio ./podcast.m4a -n <notebook_id>` when complete (confirm when asked)
 
-### Research to Podcast (Automated with Subagent)
+### Research to Podcast (Automated Background Workflow)
 **Time:** 5-10 minutes, but continues in background
 
 When user wants full automation (generate and download when ready):
@@ -412,15 +412,16 @@ When user wants full automation (generate and download when ready):
 1. Create notebook and add sources as usual
 2. Wait for sources to be ready (use `source wait` or check `source list --json`)
 3. Run `notebooklm generate audio "..." --json` → parse `task_id` from output
-4. Delegate the wait-and-download work to a background general-purpose agent using the current harness's subagent mechanism. Give it this prompt:
+4. If the harness provides a background agent that can execute commands, delegate the wait-and-download work with this prompt:
    > Wait for artifact `{task_id}` in notebook `{notebook_id}` to complete, then download it. Run `notebooklm artifact wait {task_id} -n {notebook_id} --timeout 1200`, followed by `notebooklm download audio ./podcast.m4a -a {task_id} -n {notebook_id}`.
-5. Main conversation continues while agent waits
+5. Otherwise, return the task ID and those exact wait/download commands to the user; do not block the main conversation.
+6. With background execution, the main conversation continues while the agent waits.
 
-**Error handling in subagent:**
+**Error handling during background execution:**
 - If `artifact wait` returns exit code 2 (timeout): Report timeout, suggest checking `artifact list`
 - If download fails: Check if artifact status is COMPLETED first
 
-**Benefits:** Non-blocking, user can do other work, automatic download on completion
+**Benefit when background execution is available:** Non-blocking generation with automatic download on completion.
 
 ### Document Analysis
 **Time:** 1-2 minutes
@@ -447,7 +448,7 @@ When user wants full automation (generate and download when ready):
 **Source limits:** Varies by plan—Standard: 50, Plus: 100, Pro: 300, Ultra: 600 sources per notebook. See [NotebookLM plans](https://support.google.com/notebooklm/answer/16213268) for details. The CLI does not enforce these limits; they are applied by your NotebookLM account.
 **Supported types:** PDFs, YouTube URLs, web URLs, Google Docs, text files, Markdown, Word docs, EPUB, audio files, video files, images
 
-### Bulk Import with Source Waiting (Subagent Pattern)
+### Bulk Import with Source Waiting (Background Workflow)
 **Time:** Varies by source count
 
 When adding multiple sources and needing to wait for processing before chat/generation:
@@ -457,14 +458,14 @@ When adding multiple sources and needing to wait for processing before chat/gene
    notebooklm source add "https://url1.com" --json  # → {"source": {"id": "abc...", ...}}
    notebooklm source add "https://url2.com" --json  # → {"source": {"id": "def...", ...}}
    ```
-2. Delegate the wait to a background general-purpose agent using the current harness's subagent mechanism. Give it this prompt:
+2. If the harness provides a background agent that can execute commands, delegate the wait with this prompt:
    > Wait for sources `{source_ids}` in notebook `{notebook_id}` to be ready. For each source, run `notebooklm source wait {id} -n {notebook_id} --timeout 600`. Report when all are ready or if any fail.
-3. Main conversation continues while agent waits
-4. Once sources are ready, proceed with chat or generation
+3. Otherwise, return the source IDs and exact wait commands to the user; do not block the main conversation.
+4. Proceed with chat or generation after the waits report readiness.
 
 **Why wait for sources?** Sources must be indexed before chat or generation. Takes ~30 seconds to several minutes per source (see the processing-times table below).
 
-### Deep Web Research (Subagent Pattern)
+### Deep Web Research (Background Workflow)
 **Time:** 15-30+ minutes, runs in background
 
 Deep research finds and analyzes web sources on a topic:
@@ -474,10 +475,10 @@ Deep research finds and analyzes web sources on a topic:
    ```bash
    notebooklm source add-research "topic query" --mode deep --no-wait
    ```
-3. Delegate the wait-and-import work to a background general-purpose agent using the current harness's subagent mechanism. Give it this prompt:
+3. If the harness provides a background agent that can execute commands, delegate the wait-and-import work with this prompt:
    > Wait for research in notebook `{notebook_id}` to complete and import its sources. Run `notebooklm research wait -n {notebook_id} --import-all --timeout 1800`. Report how many sources were imported.
-4. Main conversation continues while agent waits
-5. When agent completes, sources are imported automatically
+4. Otherwise, return the research task ID and exact wait/import command to the user; do not block the main conversation.
+5. With background execution, the main conversation continues while the agent waits and imports sources.
 
 **Alternative (blocking):** For simple cases, omit `--no-wait`:
 ```bash
@@ -605,7 +606,7 @@ notebooklm source add-research --prompt-file ./research_query.txt --mode deep
 2. Retry after 5-10 minutes
 3. Use the NotebookLM web UI as fallback
 
-**Processing times vary significantly.** Use the subagent pattern for long operations:
+**Processing times vary significantly.** Use background execution when the harness supports it:
 
 | Operation | Typical time | Suggested timeout |
 |-----------|--------------|-------------------|
@@ -614,7 +615,7 @@ notebooklm source add-research --prompt-file ./research_query.txt --mode deep
 | Research (deep) | 15 - 30+ min | 1800s |
 | Notes | instant | n/a |
 | Mind-map (note-backed) | instant (sync) | n/a |
-| Mind-map (interactive, default) | asynchronous | Inspect returned status; use `artifact wait` when completion is required |
+| Mind-map (interactive, default) | asynchronous backend; CLI waits for completion | no separate wait |
 | Quiz, flashcards | 5 - 15 min | 900s |
 | Report, data-table | 5 - 15 min | 900s |
 | Audio generation | 10 - 20 min | 1200s |
