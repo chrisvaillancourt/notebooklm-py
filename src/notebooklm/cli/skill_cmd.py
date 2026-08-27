@@ -339,11 +339,19 @@ def status(scope: str, target_name: str, json_output: bool):
     """Check installed skill targets and version info."""
     cli_version = get_package_version()
     selected_targets = iter_targets(target_name)
+    source_content = get_skill_source_content()
+    stamped_content = (
+        add_version_comment(source_content, cli_version) if source_content is not None else None
+    )
     target_rows = []
     for target in selected_targets:
         skill_path = get_skill_path(target, scope)
         skill_version = get_skill_version(skill_path)
         installed = skill_path.exists()
+        content_mismatch = None
+        if installed and stamped_content is not None:
+            install_status, _ = classify_target(target, scope, stamped_content)
+            content_mismatch = install_status != TARGET_UP_TO_DATE
         target_rows.append(
             {
                 "target": target,
@@ -354,6 +362,7 @@ def status(scope: str, target_name: str, json_output: bool):
                 "version_mismatch": bool(
                     installed and skill_version and skill_version != cli_version
                 ),
+                "content_mismatch": content_mismatch,
             }
         )
     any_installed = any(row["installed"] for row in target_rows)
@@ -376,6 +385,11 @@ def status(scope: str, target_name: str, json_output: bool):
             if row["version_mismatch"]:
                 console.print(
                     "    [yellow]Version mismatch[/yellow] - run [cyan]notebooklm skill install[/cyan]"
+                )
+            elif row["content_mismatch"]:
+                console.print(
+                    "    [yellow]Content mismatch[/yellow] - installed content differs from "
+                    "the packaged skill; run [cyan]notebooklm skill install[/cyan]"
                 )
 
     if not any_installed:

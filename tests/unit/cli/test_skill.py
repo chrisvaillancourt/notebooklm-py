@@ -522,16 +522,18 @@ class TestSkillStatus:
         assert result.output.count("Installed") >= 2
 
     def test_skill_status_json(self, runner, tmp_path):
-        """``skill status --json`` emits a single structured document."""
+        """``skill status --json`` reports version and canonical content state."""
         home = tmp_path / "home"
         version = "1.2.3"
+        source_content = "# Test"
         dest = home / ".agents" / "skills" / "notebooklm" / "SKILL.md"
         dest.parent.mkdir(parents=True)
-        dest.write_text(f"<!-- notebooklm-py v{version} -->\n# Test")
+        dest.write_text(skill_module.add_version_comment(source_content, version), encoding="utf-8")
 
         with (
             patch.object(skill_module.Path, "home", return_value=home),
             patch.object(skill_module, "get_package_version", return_value=version),
+            patch.object(skill_module, "get_skill_source_content", return_value=source_content),
         ):
             result = runner.invoke(cli, ["skill", "status", "--target", "agents", "--json"])
 
@@ -542,6 +544,62 @@ class TestSkillStatus:
         assert agents["installed"] is True
         assert agents["skill_version"] == version
         assert agents["version_mismatch"] is False
+        assert agents["content_mismatch"] is False
+
+    def test_skill_status_json_reports_same_version_content_drift(self, runner, tmp_path):
+        """Same-version local edits are distinct from a package-version mismatch."""
+        home = tmp_path / "home"
+        version = "1.2.3"
+        dest = home / ".agents" / "skills" / "notebooklm" / "SKILL.md"
+        dest.parent.mkdir(parents=True)
+        dest.write_text(f"<!-- notebooklm-py v{version} -->\n# Local edit", encoding="utf-8")
+
+        with (
+            patch.object(skill_module.Path, "home", return_value=home),
+            patch.object(skill_module, "get_package_version", return_value=version),
+            patch.object(skill_module, "get_skill_source_content", return_value="# Canonical"),
+        ):
+            result = runner.invoke(cli, ["skill", "status", "--target", "agents", "--json"])
+
+        assert result.exit_code == 0, result.output
+        agents = json.loads(result.output)["targets"][0]
+        assert agents["version_mismatch"] is False
+        assert agents["content_mismatch"] is True
+
+    def test_skill_status_displays_same_version_content_drift(self, runner, tmp_path):
+        """Human-readable status explains drift without claiming a version mismatch."""
+        home = tmp_path / "home"
+        version = "1.2.3"
+        dest = home / ".agents" / "skills" / "notebooklm" / "SKILL.md"
+        dest.parent.mkdir(parents=True)
+        dest.write_text(f"<!-- notebooklm-py v{version} -->\n# Local edit", encoding="utf-8")
+
+        with (
+            patch.object(skill_module.Path, "home", return_value=home),
+            patch.object(skill_module, "get_package_version", return_value=version),
+            patch.object(skill_module, "get_skill_source_content", return_value="# Canonical"),
+        ):
+            result = runner.invoke(cli, ["skill", "status", "--target", "agents"])
+
+        assert result.exit_code == 0, result.output
+        assert "content mismatch" in result.output.lower()
+        assert "version mismatch" not in result.output.lower()
+
+    def test_skill_status_json_reports_unknown_content_for_missing_target(self, runner, tmp_path):
+        """An absent target has no content comparison result."""
+        home = tmp_path / "home"
+
+        with (
+            patch.object(skill_module.Path, "home", return_value=home),
+            patch.object(skill_module, "get_package_version", return_value="1.2.3"),
+            patch.object(skill_module, "get_skill_source_content", return_value="# Canonical"),
+        ):
+            result = runner.invoke(cli, ["skill", "status", "--target", "agents", "--json"])
+
+        assert result.exit_code == 0, result.output
+        agents = json.loads(result.output)["targets"][0]
+        assert agents["installed"] is False
+        assert agents["content_mismatch"] is None
 
 
 class TestSkillUninstall:
