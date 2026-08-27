@@ -158,7 +158,6 @@ Before starting workflows, verify auth is in place. **Use `--test --json` (not b
 - `notebooklm artifact list` - list artifacts
 - `notebooklm language list` - list supported languages
 - `notebooklm language get` - get current language
-- `notebooklm language set` - set language (global setting)
 - `notebooklm artifact wait` - wait for artifact completion (in subagent context)
 - `notebooklm source wait` - wait for source processing (in subagent context)
 - `notebooklm research status` - check research status
@@ -175,6 +174,7 @@ Before starting workflows, verify auth is in place. **Use `--test --json` (not b
 - `notebooklm doctor` - check environment health
 
 **Ask before running:**
+- `notebooklm language set` - changes the account-global output language. Prefer per-command `--language`; require confirmation before changing the global setting.
 - `notebooklm delete`, `source delete`, `source delete-by-title`, `source clean`, `note delete`, `artifact delete`, `label delete`, `share remove`, `auth logout`, `clear`, `profile delete`, or `ask --new` - destructive or state-changing. Once approved, pass `--yes`/`-y` where the command supports it. Most destructive `--json` commands still require explicit `--yes` and otherwise return a structured confirmation error (`CONFIRM_REQUIRED` or `VALIDATION_ERROR`, depending on the command family); current exceptions include `share remove --json` and `ask --new --json`, which skip the prompt for non-interactive callers.
 - `notebooklm generate *` - long-running, may fail
 - `notebooklm download *` - writes to filesystem
@@ -396,13 +396,13 @@ These capabilities are available via CLI but not in NotebookLM's web interface:
 ### Research to Podcast (Interactive)
 **Time:** 5-10 minutes total
 
-1. `notebooklm create "Research: [topic]"` — *if fails: check auth with `notebooklm login`*
-2. `notebooklm source add` for each URL/document — *if one fails: log warning, continue with others*
-3. Wait for sources: `notebooklm source list --json` until all status=READY — *required before generation*
-4. `notebooklm generate audio "Focus on [specific angle]"` (confirm when asked) — *if rate limited: wait 5 min, retry once*
+1. `notebooklm create "Research: [topic]" --json` and capture `.notebook.id` — *if this fails, diagnose auth before retrying*
+2. Add each URL/document with `notebooklm source add <source> -n <notebook_id> --json` and capture `.source.id` — *if one fails, log the warning and continue with the others*
+3. For every captured source ID, run `notebooklm source wait <source_id> -n <notebook_id> --timeout 600` — *required before generation; if checking `source list --json` instead, require lowercase `status == "ready"`*
+4. `notebooklm generate audio "Focus on [specific angle]" -n <notebook_id>` (confirm when asked) — *if rate limited, wait 5 minutes and retry once*
 5. Note the artifact ID returned
-6. Check `notebooklm artifact list` later for status
-7. `notebooklm download audio ./podcast.m4a` when complete (confirm when asked)
+6. Check `notebooklm artifact list -n <notebook_id>` later for status
+7. `notebooklm download audio ./podcast.m4a -n <notebook_id>` when complete (confirm when asked)
 
 ### Research to Podcast (Automated with Subagent)
 **Time:** 5-10 minutes, but continues in background
@@ -412,15 +412,8 @@ When user wants full automation (generate and download when ready):
 1. Create notebook and add sources as usual
 2. Wait for sources to be ready (use `source wait` or check `source list --json`)
 3. Run `notebooklm generate audio "..." --json` → parse `task_id` from output
-4. **Spawn a background agent** using Task tool:
-   ```python
-   Task(
-     prompt="Wait for artifact {task_id} in notebook {notebook_id} to complete, then download.
-             Use: notebooklm artifact wait {task_id} -n {notebook_id} --timeout 1200
-             Then: notebooklm download audio ./podcast.m4a -a {task_id} -n {notebook_id}",
-     subagent_type="general-purpose"
-   )
-   ```
+4. Delegate the wait-and-download work to a background general-purpose agent using the current harness's subagent mechanism. Give it this prompt:
+   > Wait for artifact `{task_id}` in notebook `{notebook_id}` to complete, then download it. Run `notebooklm artifact wait {task_id} -n {notebook_id} --timeout 1200`, followed by `notebooklm download audio ./podcast.m4a -a {task_id} -n {notebook_id}`.
 5. Main conversation continues while agent waits
 
 **Error handling in subagent:**
@@ -432,11 +425,12 @@ When user wants full automation (generate and download when ready):
 ### Document Analysis
 **Time:** 1-2 minutes
 
-1. `notebooklm create "Analysis: [project]"`
-2. `notebooklm source add ./doc.pdf` (or URLs)
-3. `notebooklm ask "Summarize the key points"`
-4. `notebooklm ask "What are the main arguments?"`
-5. Continue chatting as needed
+1. `notebooklm create "Analysis: [project]" --json` and capture `.notebook.id`
+2. `notebooklm source add ./doc.pdf -n <notebook_id> --json` (or add URLs) and capture `.source.id`
+3. `notebooklm source wait <source_id> -n <notebook_id> --timeout 600`
+4. `notebooklm ask "Summarize the key points" -n <notebook_id>`
+5. `notebooklm ask "What are the main arguments?" -n <notebook_id>`
+6. Continue chatting as needed
 
 ### Bulk Import
 **Time:** Varies by source count
@@ -463,15 +457,8 @@ When adding multiple sources and needing to wait for processing before chat/gene
    notebooklm source add "https://url1.com" --json  # → {"source": {"id": "abc...", ...}}
    notebooklm source add "https://url2.com" --json  # → {"source": {"id": "def...", ...}}
    ```
-2. **Spawn a background agent** to wait for all sources:
-   ```
-   Task(
-     prompt="Wait for sources {source_ids} in notebook {notebook_id} to be ready.
-             For each: notebooklm source wait {id} -n {notebook_id} --timeout 600
-             Report when all ready or if any fail.",
-     subagent_type="general-purpose"
-   )
-   ```
+2. Delegate the wait to a background general-purpose agent using the current harness's subagent mechanism. Give it this prompt:
+   > Wait for sources `{source_ids}` in notebook `{notebook_id}` to be ready. For each source, run `notebooklm source wait {id} -n {notebook_id} --timeout 600`. Report when all are ready or if any fail.
 3. Main conversation continues while agent waits
 4. Once sources are ready, proceed with chat or generation
 
@@ -487,15 +474,8 @@ Deep research finds and analyzes web sources on a topic:
    ```bash
    notebooklm source add-research "topic query" --mode deep --no-wait
    ```
-3. **Spawn a background agent** to wait and import:
-   ```
-   Task(
-     prompt="Wait for research in notebook {notebook_id} to complete and import sources.
-             Use: notebooklm research wait -n {notebook_id} --import-all --timeout 1800
-             Report how many sources were imported.",
-     subagent_type="general-purpose"
-   )
-   ```
+3. Delegate the wait-and-import work to a background general-purpose agent using the current harness's subagent mechanism. Give it this prompt:
+   > Wait for research in notebook `{notebook_id}` to complete and import its sources. Run `notebooklm research wait -n {notebook_id} --import-all --timeout 1800`. Report how many sources were imported.
 4. Main conversation continues while agent waits
 5. When agent completes, sources are imported automatically
 
@@ -561,10 +541,7 @@ notebooklm artifact list --json
 
 ## Error Handling
 
-**On failure, offer the user a choice:**
-1. Retry the operation
-2. Skip and continue with something else
-3. Investigate the error
+Diagnose failures automatically with read-only commands and the decision table below. Retry only when the operation is safe and the retry is bounded. Ask the user when recovery requires user action, a destructive change, or a material choice between alternatives.
 
 **Error decision tree:**
 
@@ -636,7 +613,8 @@ notebooklm source add-research --prompt-file ./research_query.txt --mode deep
 | Research (fast) | 30s - 2 min | 180s |
 | Research (deep) | 15 - 30+ min | 1800s |
 | Notes | instant | n/a |
-| Mind-map | instant (sync) | n/a |
+| Mind-map (note-backed) | instant (sync) | n/a |
+| Mind-map (interactive, default) | asynchronous | Inspect returned status; use `artifact wait` when completion is required |
 | Quiz, flashcards | 5 - 15 min | 900s |
 | Report, data-table | 5 - 15 min | 900s |
 | Audio generation | 10 - 20 min | 1200s |
