@@ -163,6 +163,17 @@ def get_installed_content(target: str, scope: str) -> str | None:
     return skill_path.read_text(encoding="utf-8")
 
 
+def compare_skill_content(skill_path: Path, stamped_content: str) -> bool | None:
+    """Return whether installed content differs, or ``None`` when unreadable or absent."""
+    try:
+        existing = skill_path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    except UnicodeError:
+        return True
+    return existing != stamped_content
+
+
 def classify_target(target: str, scope: str, stamped_content: str) -> tuple[str, Path]:
     """Classify what an install would do for a single target.
 
@@ -170,16 +181,13 @@ def classify_target(target: str, scope: str, stamped_content: str) -> tuple[str,
     :data:`TARGET_CREATE`, :data:`TARGET_UP_TO_DATE`, or :data:`TARGET_OVERWRITE`.
     """
     skill_path = get_skill_path(target, scope)
-    if not skill_path.exists():
-        return TARGET_CREATE, skill_path
-    try:
-        existing = skill_path.read_text(encoding="utf-8")
-    except (OSError, UnicodeError):
-        # Unreadable or undecodable existing content is necessarily not canonical.
+    content_mismatch = compare_skill_content(skill_path, stamped_content)
+    if content_mismatch is None:
+        status = TARGET_OVERWRITE if skill_path.exists() else TARGET_CREATE
+        return status, skill_path
+    if content_mismatch:
         return TARGET_OVERWRITE, skill_path
-    if existing == stamped_content:
-        return TARGET_UP_TO_DATE, skill_path
-    return TARGET_OVERWRITE, skill_path
+    return TARGET_UP_TO_DATE, skill_path
 
 
 def report_mixed_no_clobber_up_to_date(

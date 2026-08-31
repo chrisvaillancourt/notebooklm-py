@@ -27,6 +27,7 @@ from .._app.skill import (
     add_version_comment,
     build_skill_archive_bytes,
     classify_target,
+    compare_skill_content,
     get_installed_content,
     get_package_version,
     get_scope_root,
@@ -55,6 +56,7 @@ __all__ = [
     "atomic_write_text",
     "build_skill_archive_bytes",
     "classify_target",
+    "compare_skill_content",
     "get_installed_content",
     "get_package_version",
     "get_scope_root",
@@ -353,8 +355,7 @@ def status(scope: str, target_name: str, json_output: bool):
         installed = skill_path.exists()
         content_mismatch = None
         if installed and stamped_content is not None:
-            install_status, _ = classify_target(target, scope, stamped_content)
-            content_mismatch = install_status != TARGET_UP_TO_DATE
+            content_mismatch = compare_skill_content(skill_path, stamped_content)
         target_rows.append(
             {
                 "target": target,
@@ -391,8 +392,8 @@ def status(scope: str, target_name: str, json_output: bool):
                 )
             if row["content_mismatch"] is None:
                 console.print(
-                    "    [yellow]Content check unavailable[/yellow] - packaged skill source "
-                    "could not be read"
+                    "    [yellow]Content check unavailable[/yellow] - installed or packaged "
+                    "skill content could not be read"
                 )
             elif row["content_mismatch"] and not row["version_mismatch"]:
                 console.print(

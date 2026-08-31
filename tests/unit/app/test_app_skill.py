@@ -33,6 +33,7 @@ from notebooklm._app.skill import (
     add_version_comment,
     build_skill_archive_bytes,
     classify_target,
+    compare_skill_content,
     get_scope_root,
     get_skill_path,
     get_skill_version,
@@ -229,6 +230,14 @@ def test_classify_target_overwrite_when_content_is_not_utf8(tmp_path: Path) -> N
 
     assert status == TARGET_OVERWRITE
     assert resolved == path
+
+
+def test_compare_skill_content_returns_none_when_unreadable(tmp_path: Path) -> None:
+    path = tmp_path / "SKILL.md"
+    path.write_text("stamped body", encoding="utf-8")
+
+    with patch.object(Path, "read_text", side_effect=PermissionError):
+        assert compare_skill_content(path, "stamped body") is None
 
 
 # ---------------------------------------------------------------------------
