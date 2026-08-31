@@ -398,23 +398,23 @@ These capabilities are available via CLI but not in NotebookLM's web interface:
 
 1. `notebooklm create "Research: [topic]" --json` and capture `.notebook.id` — *if this fails, diagnose auth before retrying*
 2. Add each URL/document with `notebooklm source add <source> -n <notebook_id> --json` and capture `.source.id` — *if one fails, log the warning and continue with the others*
-3. For every captured source ID, run `notebooklm source wait <source_id> -n <notebook_id> --timeout 600` — *required before generation; if checking `source list --json` instead, require lowercase `status == "ready"`*
+3. For every captured source ID, run `notebooklm source wait <source_id> -n <notebook_id> --timeout 600` — *required before generation; if checking `notebooklm source list -n <notebook_id> --json` instead, require lowercase `status == "ready"`*
 4. `notebooklm generate audio "Focus on [specific angle]" -n <notebook_id>` (confirm when asked) — *if rate limited, wait 5 minutes and retry once*
 5. Note the artifact ID returned
 6. Check `notebooklm artifact list -n <notebook_id>` later for status
-7. `notebooklm download audio ./podcast.m4a -n <notebook_id>` when complete (confirm when asked)
+7. `notebooklm download audio ./podcast.m4a -a <artifact_id> -n <notebook_id>` when complete (confirm when asked)
 
 ### Research to Podcast (Automated Background Workflow)
 **Time:** 5-10 minutes, but continues in background
 
 When user wants full automation (generate and download when ready):
 
-1. Create notebook and add sources as usual
-2. Wait for sources to be ready (use `source wait` or check `source list --json`)
-3. Run `notebooklm generate audio "..." --json` → parse `task_id` from output
+1. Create the notebook with `--json`, capture `.notebook.id`, add each source with `-n <notebook_id> --json`, and capture every `.source.id`
+2. Wait for every source with `notebooklm source wait <source_id> -n <notebook_id>` (or check `notebooklm source list -n <notebook_id> --json` for lowercase `status == "ready"`)
+3. Run `notebooklm generate audio "..." -n <notebook_id> --json` and parse `task_id` from the output
 4. If the harness provides a background agent that can execute commands, delegate the wait-and-download work with this prompt:
    > Wait for artifact `{task_id}` in notebook `{notebook_id}` to complete, then download it. Run `notebooklm artifact wait {task_id} -n {notebook_id} --timeout 1200`, followed by `notebooklm download audio ./podcast.m4a -a {task_id} -n {notebook_id}`.
-5. Otherwise, return the task ID and those exact wait/download commands to the user; do not block the main conversation.
+5. Otherwise, return the notebook ID, task ID, and those exact wait/download commands to the user; do not block the main conversation.
 6. With background execution, the main conversation continues while the agent waits.
 
 **Error handling during background execution:**
@@ -427,8 +427,8 @@ When user wants full automation (generate and download when ready):
 **Time:** 1-2 minutes
 
 1. `notebooklm create "Analysis: [project]" --json` and capture `.notebook.id`
-2. `notebooklm source add ./doc.pdf -n <notebook_id> --json` (or add URLs) and capture `.source.id`
-3. `notebooklm source wait <source_id> -n <notebook_id> --timeout 600`
+2. Add each document or URL with `notebooklm source add <source> -n <notebook_id> --json` and capture every `.source.id`
+3. For every captured source ID, run `notebooklm source wait <source_id> -n <notebook_id> --timeout 600`; continue only after all sources are ready
 4. `notebooklm ask "Summarize the key points" -n <notebook_id>`
 5. `notebooklm ask "What are the main arguments?" -n <notebook_id>`
 6. Continue chatting as needed
@@ -470,19 +470,19 @@ When adding multiple sources and needing to wait for processing before chat/gene
 
 Deep research finds and analyzes web sources on a topic:
 
-1. Create notebook: `notebooklm create "Research: [topic]"`
-2. Start deep research (non-blocking):
+1. Create the notebook with `notebooklm create "Research: [topic]" --json` and capture `.notebook.id`.
+2. Start deep research without blocking, then capture `.poll_task_id // .task_id` as `<run_id>`:
    ```bash
-   notebooklm source add-research "topic query" --mode deep --no-wait
+   notebooklm source add-research "topic query" -n <notebook_id> --mode deep --no-wait --json
    ```
 3. If the harness provides a background agent that can execute commands, delegate the wait-and-import work with this prompt:
-   > Wait for research in notebook `{notebook_id}` to complete and import its sources. Run `notebooklm research wait -n {notebook_id} --import-all --timeout 1800`. Report how many sources were imported.
-4. Otherwise, return the research task ID and exact wait/import command to the user; do not block the main conversation.
+   > Wait for research run `{run_id}` in notebook `{notebook_id}` to complete and import its sources. Run `notebooklm research wait -n {notebook_id} --run-id {run_id} --import-all --timeout 1800`. Report how many sources were imported.
+4. Otherwise, return the notebook ID, run ID, and that exact wait/import command to the user; do not block the main conversation.
 5. With background execution, the main conversation continues while the agent waits and imports sources.
 
 **Alternative (blocking):** For simple cases, omit `--no-wait`:
 ```bash
-notebooklm source add-research "topic" --mode deep --import-all
+notebooklm source add-research "topic" -n <notebook_id> --mode deep --import-all
 # Blocks until research completes (deep mode: 15-30+ min)
 ```
 
